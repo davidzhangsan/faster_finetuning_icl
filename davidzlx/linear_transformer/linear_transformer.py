@@ -29,6 +29,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # For linear attention, activation = None
 # For standard attention, activation(x) = torch.nn.functional.softmax(x, dim = 2)
 # For ReLU attention, activation(x) = torch.nn.relu(x)
+
+# This is exactly
 def attention(P,Q,Z, activation = None):
     B= Z.shape[0]
     N = Z.shape[1]-1
@@ -101,7 +103,7 @@ def in_context_loss(model, Z, y):
 # For gamma distribution:
 # - shape_k: shape parameter of gamma distribution (unused otherwise)
 # - scale parameter: hard coded so that when shape_k = 5/2 and d=5, the generated data is standard normal
-def generate_data(mode='normal',N=20,d=1,B=1000,shape_k=0.1, U=None, D=None):
+def generate_data(mode='normal', N=20, d=1,B=1000,shape_k=0.1, U=None, D=None):
     W= torch.FloatTensor(B, d).normal_(0,1).to(device)
     X = torch.FloatTensor(B, N, d).normal_(0, 1).to(device)
     X_test = torch.FloatTensor(B,1,d).normal_(0, 1).to(device)
@@ -151,94 +153,3 @@ def generate_data(mode='normal',N=20,d=1,B=1000,shape_k=0.1, U=None, D=None):
     y_comb= torch.cat([y,y_zero],dim=1)
     Z= torch.cat([X_comb,y_comb],dim=2)
     return Z.to(device),y_test.to(device)
-
-def generate_data_inplace(Z, U=None, D=None):
-    
-    
-    B = Z.shape[0]
-    N = Z.shape[1]-1
-    d = Z.shape[2]-1
-    X = Z[:,:,0:-1]
-    X.normal_(0, 1).to(device)
-    W= torch.FloatTensor(B, d).normal_(0,1).to(device)
-    if U is not None:
-        U = U.to(device)
-        D = D.to(device)
-        W = torch.mm(W,torch.inverse(D))
-        W = torch.mm(W,U.t())
-        Z[:,:,0:-1] = torch.einsum('ij, jk, BNk -> BNi', (U,D,X))
-        
-    Z[:,:,-1] = torch.einsum('bi,bni->bn', (W, Z[:,:,0:-1])) #y update
-    y_test = Z[:,-1,-1].detach().clone()
-    Z[:,-1,-1].zero_()
-    return Z.to(device),y_test.to(device)
-
-def generate_data_sine(N=10, B=1000):
-    # Sample amplitude a and phase p for each task
-    a = torch.FloatTensor(B).uniform_(0.1, 5).to(device)
-    p = torch.FloatTensor(B).uniform_(0, math.pi).to(device)
- 
-    X = torch.FloatTensor(B, N).uniform_(-5, 5).to(device)
- 
-    Y = a.unsqueeze(1) * torch.sin(p.unsqueeze(1) + X)
- 
-    X = X.unsqueeze(-1)
-    Y = Y.unsqueeze(-1)
-
-    return X, Y
-
-def generate_data_relu(mode='normal', N=20, d=1, B=1000, shape_k=0.1, U=None, D=None, hidden_dim=100):
-    # Generate random input data
-    X = torch.FloatTensor(B, N, d).normal_(0, 1).to(device)
-    X_test = torch.FloatTensor(B, 1, d).normal_(0, 1).to(device)
-
-    # Additional transformations if mode is 'sphere' or 'gamma' [Similar to the existing generate_data function]
-
-    # Define a 1-hidden layer ReLU network
-    model = nn.Sequential(
-        nn.Linear(d, hidden_dim),
-        nn.ReLU(),
-        nn.Linear(hidden_dim, 1)
-    ).to(device)
-    model[0].weight.data.normal_(0, 0.1)
-    model[2].weight.data.normal_(0, 0.1)
-
-    # Generate y values using the ReLU network
-    y = model(X.view(-1, d)).view(B, N, 1)
-    y_test = model(X_test.view(-1, d)).view(B, 1).squeeze(1)
- 
-    y_zero = torch.zeros(B, 1, 1).to(device)
-    X_comb = torch.cat([X, X_test], dim=1)
-    y_comb = torch.cat([y, y_zero], dim=1)
-    Z = torch.cat([X_comb, y_comb], dim=2)
-
-    return Z, y_test
-
-def generate_data_mlp(N=20, d=1, B=1000, hidden_dim=100):
-    # Generate random input data
-    X = torch.FloatTensor(B, N, d).normal_(0, 1).to(device)
-    X_test = torch.FloatTensor(B, 1, d).normal_(0, 1).to(device)
-
-    # Additional transformations if mode is 'sphere' or 'gamma' [Similar to the existing generate_data function]
-
-    # Define a 1-hidden layer ReLU network
-    model = nn.Sequential(
-        nn.Linear(d, hidden_dim),
-        nn.ReLU(),
-        nn.Linear(hidden_dim, d)
-    ).to(device)
-    model[0].weight.data.normal_(0, 1)
-    model[2].weight.data.normal_(0, 1)
-
-    X_MLP = model(X.view(-1, d)).view(B, N, d)
-    X_test_MLP = model(X_test.view(-1, d)).view(B, 1, d)
-
-    W = torch.FloatTensor(B, d).normal_(0,1).to(device)
-    y = torch.einsum('bi,bni->bn', (W, X_MLP)).unsqueeze(2)
-    y_zero = torch.zeros(B,1,1).to(device)
-    y_test = torch.einsum('bi,bni->bn', (W, X_test_MLP)).squeeze(1)
-    X_comb= torch.cat([X_MLP,X_test_MLP],dim=1)
-    y_comb= torch.cat([y,y_zero],dim=1)
-    Z= torch.cat([X_comb,y_comb],dim=2)
-
-    return Z, y_test
